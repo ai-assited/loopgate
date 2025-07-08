@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"errors"
+	"loopgate/internal/middleware" // Added for UserClaimsContextKey
 	"net/http"
 	"strings"
 
@@ -151,7 +152,7 @@ func (h *AuthHandlers) LoginUserHandler(w http.ResponseWriter, r *http.Request) 
 // Helper to extract user ID from JWT claims in context (to be used by other handlers)
 // This would typically be set by a JWT authentication middleware.
 func GetUserClaimsFromContext(r *http.Request) (*types.Claims, error) {
-	claims, ok := r.Context().Value("userClaims").(*types.Claims)
+	claims, ok := r.Context().Value(middleware.UserClaimsContextKey).(*types.Claims)
 	if !ok || claims == nil {
 		return nil, errors.New("user claims not found in context, ensure JWTAuthMiddleware is used")
 	}

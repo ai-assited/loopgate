@@ -261,6 +261,83 @@ func TestLoginHandler(t *testing.T) {
 	assert.Equal(t, http.StatusUnauthorized, resp.StatusCode, "Login with non-existent user should fail")
 }
 
+func TestUserAPIKeyRoutes_WithJWTAuth(t *testing.T) {
+	adminUsername := "jwtuser"
+	adminPassword := "jwtpass123"
+	cleanup := setupTestEnvironment(t, adminUsername, adminPassword)
+	defer cleanup()
+
+	// 1. Login to get a token
+	loginPayload := handlers.LoginUserRequest{
+		Username: adminUsername,
+		Password: adminPassword,
+	}
+	loginPayloadBytes, _ := json.Marshal(loginPayload)
+	loginReq, _ := http.NewRequest("POST", testServer.URL+"/api/auth/login", bytes.NewBuffer(loginPayloadBytes))
+	loginReq.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{}
+	loginResp, err := client.Do(loginReq)
+	require.NoError(t, err)
+	defer loginResp.Body.Close()
+	require.Equal(t, http.StatusOK, loginResp.StatusCode)
+
+	var lr handlers.LoginUserResponse
+	err = json.NewDecoder(loginResp.Body).Decode(&lr)
+	require.NoError(t, err)
+	require.NotEmpty(t, lr.Token)
+
+	// 2. Test POST /api/user/apikeys (Create API Key)
+	createAPIKeyPayload := handlers.CreateAPIKeyRequest{Label: "test-key-for-jwt-user"}
+	createAPIKeyBytes, _ := json.Marshal(createAPIKeyPayload)
+	apiKeyReq, _ := http.NewRequest("POST", testServer.URL+"/api/user/apikeys", bytes.NewBuffer(createAPIKeyBytes))
+	apiKeyReq.Header.Set("Content-Type", "application/json")
+	apiKeyReq.Header.Set("Authorization", "Bearer "+lr.Token)
+
+	apiKeyResp, err := client.Do(apiKeyReq)
+	require.NoError(t, err)
+	defer apiKeyResp.Body.Close()
+
+	assert.Equal(t, http.StatusCreated, apiKeyResp.StatusCode, "Create API key should succeed with valid JWT")
+
+	var createResp handlers.CreateAPIKeyResponse
+	err = json.NewDecoder(apiKeyResp.Body).Decode(&createResp)
+	require.NoError(t, err)
+	assert.NotEmpty(t, createResp.RawKey)
+	assert.Equal(t, "test-key-for-jwt-user", createResp.Label)
+
+	// 3. Test GET /api/user/apikeys (List API Keys)
+	listAPIKeysReq, _ := http.NewRequest("GET", testServer.URL+"/api/user/apikeys", nil)
+	listAPIKeysReq.Header.Set("Authorization", "Bearer "+lr.Token)
+	listAPIKeysResp, err := client.Do(listAPIKeysReq)
+	require.NoError(t, err)
+	defer listAPIKeysResp.Body.Close()
+	assert.Equal(t, http.StatusOK, listAPIKeysResp.StatusCode, "List API keys should succeed with valid JWT")
+	var listResp []handlers.APIKeyDetailsResponse
+	err = json.NewDecoder(listAPIKeysResp.Body).Decode(&listResp)
+	require.NoError(t, err)
+	assert.Len(t, listResp, 1)
+	assert.Equal(t, createResp.ID, listResp[0].ID)
+
+
+	// 4. Test POST /api/user/apikeys without token
+	apiKeyReqNoAuth, _ := http.NewRequest("POST", testServer.URL+"/api/user/apikeys", bytes.NewBuffer(createAPIKeyBytes))
+	apiKeyReqNoAuth.Header.Set("Content-Type", "application/json")
+	apiKeyRespNoAuth, err := client.Do(apiKeyReqNoAuth)
+	require.NoError(t, err)
+	defer apiKeyRespNoAuth.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, apiKeyRespNoAuth.StatusCode, "Create API key should fail without JWT")
+
+	// 5. Test POST /api/user/apikeys with invalid token
+	apiKeyReqInvalidAuth, _ := http.NewRequest("POST", testServer.URL+"/api/user/apikeys", bytes.NewBuffer(createAPIKeyBytes))
+	apiKeyReqInvalidAuth.Header.Set("Content-Type", "application/json")
+	apiKeyReqInvalidAuth.Header.Set("Authorization", "Bearer invalidtoken")
+	apiKeyRespInvalidAuth, err := client.Do(apiKeyReqInvalidAuth)
+	require.NoError(t, err)
+	defer apiKeyRespInvalidAuth.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, apiKeyRespInvalidAuth.StatusCode, "Create API key should fail with invalid JWT")
+}
+
 // TODO: Add more tests:
 // - Test registration with existing username
 // - Test registration with invalid payload (e.g., missing username/password, short password)
@@ -269,8 +346,104 @@ func TestLoginHandler(t *testing.T) {
 //   (Currently hardcoded to sqlite for simplicity in test setup).
 // - Test the main.go startup more directly if possible, rather than mimicking its setup.
 //   This might require refactoring main.go to be more testable (e.g., separating server setup and start).
-// - Test API key creation/listing/revoking once user auth is solid.
-// - Test User Handlers require authentication.
+// - Test API key creation/listing/revoking once user auth is solid. (Partially done with TestUserAPIKeyRoutes_WithJWTAuth)
+// - Test User Handlers require authentication. (Partially done)
+
+func TestHITLRegisterRoute_WithAPIKeyAuth(t *testing.T) {
+	// No initial admin needed for this test, we'll create users/keys manually
+	cleanup := setupTestEnvironment(t, "", "")
+	defer cleanup()
+
+	// 1. Create a user directly in storage to own the API key
+	testUser := &types.User{
+		Username:     "apikeyowner",
+		PasswordHash: "somehash", // Not used for API key auth directly
+		IsAdmin:      false,
+	}
+	err := testStorageAdapter.CreateUser(testUser)
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, testUser.ID)
+
+	// 2. Create an API key for this user directly in storage
+	rawKey, hashedKey, err := auth.GenerateAPIKey(testConfig.APIKeyPrefix)
+	require.NoError(t, err)
+	apiKey := &types.APIKey{
+		UserID:    testUser.ID,
+		KeyHash:   hashedKey,
+		Label:     "hitl-test-key",
+		Prefix:    testConfig.APIKeyPrefix,
+		IsActive:  true,
+		CreatedAt: time.Now(),
+	}
+	err = testStorageAdapter.CreateAPIKey(apiKey)
+	require.NoError(t, err)
+
+	// 3. Prepare HITL registration payload
+	hitlRegPayload := types.SessionRegistration{
+		SessionID:  "hitl-test-session-1",
+		ClientID:   "hitl-test-client-1",
+		TelegramID: 1234567890,
+	}
+	hitlRegBytes, _ := json.Marshal(hitlRegPayload)
+
+	client := &http.Client{}
+
+	// 4. Test /hitl/register without API key
+	hitlReqNoAuth, _ := http.NewRequest("POST", testServer.URL+"/hitl/register", bytes.NewBuffer(hitlRegBytes))
+	hitlReqNoAuth.Header.Set("Content-Type", "application/json")
+	hitlRespNoAuth, err := client.Do(hitlReqNoAuth)
+	require.NoError(t, err)
+	defer hitlRespNoAuth.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, hitlRespNoAuth.StatusCode, "HITL register should fail without API key")
+
+	// 5. Test /hitl/register with invalid API key
+	hitlReqInvalidAuth, _ := http.NewRequest("POST", testServer.URL+"/hitl/register", bytes.NewBuffer(hitlRegBytes))
+	hitlReqInvalidAuth.Header.Set("Content-Type", "application/json")
+	hitlReqInvalidAuth.Header.Set("Authorization", "Bearer invalidapikey123")
+	hitlRespInvalidAuth, err := client.Do(hitlReqInvalidAuth)
+	require.NoError(t, err)
+	defer hitlRespInvalidAuth.Body.Close()
+	assert.Equal(t, http.StatusUnauthorized, hitlRespInvalidAuth.StatusCode, "HITL register should fail with invalid API key")
+
+	// 6. Test /hitl/register with valid API key (using Authorization: Bearer method)
+	hitlReqValidAuthBearer, _ := http.NewRequest("POST", testServer.URL+"/hitl/register", bytes.NewBuffer(hitlRegBytes))
+	hitlReqValidAuthBearer.Header.Set("Content-Type", "application/json")
+	hitlReqValidAuthBearer.Header.Set("Authorization", "Bearer "+rawKey)
+	hitlRespValidAuthBearer, err := client.Do(hitlReqValidAuthBearer)
+	require.NoError(t, err)
+	defer hitlRespValidAuthBearer.Body.Close()
+	assert.Equal(t, http.StatusOK, hitlRespValidAuthBearer.StatusCode, "HITL register should succeed with valid API key via Bearer token")
+	var hitlRegResp map[string]interface{}
+	err = json.NewDecoder(hitlRespValidAuthBearer.Body).Decode(&hitlRegResp)
+	require.NoError(t, err)
+	assert.True(t, hitlRegResp["success"].(bool))
+	assert.Equal(t, hitlRegPayload.SessionID, hitlRegResp["session_id"])
+
+
+	// 7. Test /hitl/register with valid API key (using X-API-Key method)
+		// First, deactivate the previous session to avoid "session already registered" if DB is not perfectly clean between sub-tests
+	_, err = testStorageAdapter.GetSession(hitlRegPayload.SessionID)
+	if err == nil { // if session exists
+		err = testStorageAdapter.DeactivateSession(hitlRegPayload.SessionID)
+		require.NoError(t, err)
+	}
+	// Use a slightly different session ID to ensure it's a new registration
+	hitlRegPayload.SessionID = "hitl-test-session-2"
+	hitlRegBytesXKey, _ := json.Marshal(hitlRegPayload)
+
+	hitlReqValidAuthXKey, _ := http.NewRequest("POST", testServer.URL+"/hitl/register", bytes.NewBuffer(hitlRegBytesXKey))
+	hitlReqValidAuthXKey.Header.Set("Content-Type", "application/json")
+	hitlReqValidAuthXKey.Header.Set("X-API-Key", rawKey)
+	hitlRespValidAuthXKey, err := client.Do(hitlReqValidAuthXKey)
+	require.NoError(t, err)
+	defer hitlRespValidAuthXKey.Body.Close()
+	assert.Equal(t, http.StatusOK, hitlRespValidAuthXKey.StatusCode, "HITL register should succeed with valid API key via X-API-Key header")
+	var hitlRegRespXKey map[string]interface{}
+	err = json.NewDecoder(hitlRespValidAuthXKey.Body).Decode(&hitlRegRespXKey)
+	require.NoError(t, err)
+	assert.True(t, hitlRegRespXKey["success"].(bool))
+	assert.Equal(t, hitlRegPayload.SessionID, hitlRegRespXKey["session_id"])
+}
 
 // Note: The current setupTestEnvironment mimics parts of main.go's initialization.
 // A more robust approach for full integration testing of main.go would be to

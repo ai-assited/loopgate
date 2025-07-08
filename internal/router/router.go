@@ -71,19 +71,16 @@ func (r *Router) setupRoutes() {
 	userRouter.HandleFunc("/apikeys/{key_id}", r.userHandlers.RevokeAPIKeyHandler).Methods("DELETE")
 
 	// Existing MCP and HITL routes
-	// QUESTION for user: Should these be protected by APIKeyAuthMiddleware?
-	// For now, leaving them as they were (public or protected by their own internal logic if any).
-	// If they need protection:
-	// mcpHitlProtectedRouter := r.mux.PathPrefix("").Subrouter() // Or specific prefix
-	// mcpHitlProtectedRouter.Use(middleware.APIKeyAuthMiddleware(r.storageAdapter))
-	// mcpHitlProtectedRouter.HandleFunc("/mcp", r.handleMCP).Methods("POST")
-	// ... and so on for other routes
-
-	r.mux.HandleFunc("/mcp", r.handleMCP).Methods("POST") // Example: Unprotected
+	// MCP routes remain public for now as per original structure, can be revisited.
+	r.mux.HandleFunc("/mcp", r.handleMCP).Methods("POST")
 	r.mux.HandleFunc("/mcp/tools", r.handleMCPTools).Methods("GET")
 	r.mux.HandleFunc("/mcp/capabilities", r.handleMCPCapabilities).Methods("GET")
+
+	// HITL routes will be protected by API Key Authentication
 	if r.hitlHandler != nil { // hitlHandler might be nil if not configured/needed
-		r.hitlHandler.RegisterRoutes(r.mux) // Assuming RegisterRoutes adds its own paths
+		hitlRouter := r.mux.PathPrefix("/hitl").Subrouter()
+		hitlRouter.Use(middleware.APIKeyAuthMiddleware(r.storageAdapter))
+		r.hitlHandler.RegisterRoutes(hitlRouter) // Pass the subrouter to RegisterRoutes
 	}
 
 	// Example of a new route protected by API Key Authentication
