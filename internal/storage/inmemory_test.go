@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -168,4 +169,68 @@ func TestInMemoryStorageAdapter_ErrorConditions(t *testing.T) {
 	// Test GetTelegramID for non-existent client
 	_, errCond = adapter.GetTelegramID("non-existent-client")
 	assert.Error(t, errCond)
+}
+
+func TestInMemoryStorageAdapter_UserManagement(t *testing.T) {
+	adapter := NewInMemoryStorageAdapter()
+
+	// Test CreateUser
+	user1 := &types.User{
+		Username:     "testuser1",
+		PasswordHash: "hash1",
+		IsAdmin:      false,
+	}
+	err := adapter.CreateUser(user1)
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, user1.ID, "User ID should be populated")
+
+	// Test GetUserByUsername
+	retrievedUser1, err := adapter.GetUserByUsername("testuser1")
+	require.NoError(t, err)
+	require.NotNil(t, retrievedUser1)
+	assert.Equal(t, user1.ID, retrievedUser1.ID)
+	assert.Equal(t, "testuser1", retrievedUser1.Username)
+	assert.Equal(t, "hash1", retrievedUser1.PasswordHash)
+	assert.False(t, retrievedUser1.IsAdmin)
+	assert.WithinDuration(t, time.Now(), retrievedUser1.CreatedAt, 2*time.Second)
+	assert.WithinDuration(t, time.Now(), retrievedUser1.UpdatedAt, 2*time.Second)
+
+	// Test CreateUser - Admin
+	adminUser := &types.User{
+		Username:     "adminuser",
+		PasswordHash: "adminhash",
+		IsAdmin:      true,
+	}
+	err = adapter.CreateUser(adminUser)
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, adminUser.ID, "Admin User ID should be populated")
+
+	retrievedAdmin, err := adapter.GetUserByUsername("adminuser")
+	require.NoError(t, err)
+	require.NotNil(t, retrievedAdmin)
+	assert.Equal(t, adminUser.ID, retrievedAdmin.ID)
+	assert.True(t, retrievedAdmin.IsAdmin)
+
+	// Test GetUserByID
+	retrievedUserByID, err := adapter.GetUserByID(user1.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrievedUserByID)
+	assert.Equal(t, user1.ID, retrievedUserByID.ID)
+	assert.Equal(t, "testuser1", retrievedUserByID.Username)
+
+	// Test CreateUser with duplicate username
+	duplicateUser := &types.User{
+		Username:     "testuser1",
+		PasswordHash: "hash2",
+	}
+	err = adapter.CreateUser(duplicateUser)
+	assert.Error(t, err, "Should error when creating user with duplicate username")
+
+	// Test GetUserByUsername for non-existent user
+	_, err = adapter.GetUserByUsername("nonexistentuser")
+	assert.Error(t, err)
+
+	// Test GetUserByID for non-existent user
+	_, err = adapter.GetUserByID(uuid.New())
+	assert.Error(t, err)
 }

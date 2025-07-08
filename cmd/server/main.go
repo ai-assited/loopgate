@@ -7,10 +7,13 @@ import (
 	"loopgate/internal/handlers"
 	"loopgate/internal/mcp"
 	"loopgate/internal/router"
+	"loopgate/internal/auth"
 	"loopgate/internal/session"
 	"loopgate/internal/storage" // Added storage import
 	"loopgate/internal/telegram"
+	"loopgate/internal/types"
 	"net/http"
+	"strings"
 	"os"
 	"os/signal"
 	"syscall"
@@ -65,6 +68,33 @@ func main() {
 
 	// Initialize session manager with the chosen adapter
 	sessionManager := session.NewManager(storageAdapter)
+
+	// Create initial admin user if configured
+	if cfg.InitialAdminUser != "" && cfg.InitialAdminPassword != "" {
+		_, err := storageAdapter.GetUserByUsername(cfg.InitialAdminUser)
+		if err != nil { // Assuming error means user not found
+			if strings.Contains(err.Error(), "user not found") { // More specific check
+				hashedPassword, hashErr := auth.HashPassword(cfg.InitialAdminPassword)
+				if hashErr != nil {
+					log.Fatalf("Failed to hash initial admin password: %v", hashErr)
+				}
+				adminUser := &types.User{
+					Username:     cfg.InitialAdminUser,
+					PasswordHash: hashedPassword,
+					IsAdmin:      true,
+				}
+				if createErr := storageAdapter.CreateUser(adminUser); createErr != nil {
+					log.Fatalf("Failed to create initial admin user: %v", createErr)
+				}
+				log.Printf("Initial admin user '%s' created successfully.", cfg.InitialAdminUser)
+			} else {
+				// Another error occurred fetching the user
+				log.Fatalf("Failed to check for initial admin user: %v", err)
+			}
+		} else {
+			log.Printf("Initial admin user '%s' already exists.", cfg.InitialAdminUser)
+		}
+	}
 
 	telegramBot, err := telegram.NewBot(cfg.TelegramBotToken, sessionManager)
 	if err != nil {

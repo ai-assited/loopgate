@@ -126,6 +126,7 @@ type User struct {
 	ID           uuid.UUID `json:"id" gorm:"type:uuid;primary_key;"`
 	Username     string    `json:"username" gorm:"uniqueIndex;not null;size:255"`
 	PasswordHash string    `json:"-" gorm:"not null"` // Avoid exposing password hash in JSON
+	IsAdmin      bool      `json:"is_admin" gorm:"default:false;not null"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

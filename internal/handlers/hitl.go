@@ -27,13 +27,13 @@ func NewHITLHandler(sessionManager *session.Manager, telegramBot *telegram.Bot) 
 }
 
 func (h *HITLHandler) RegisterRoutes(router *mux.Router) {
-	router.HandleFunc("/hitl/register", h.RegisterSession).Methods("POST")
-	router.HandleFunc("/hitl/request", h.SubmitRequest).Methods("POST")
-	router.HandleFunc("/hitl/poll", h.PollRequest).Methods("GET")
-	router.HandleFunc("/hitl/status", h.GetStatus).Methods("GET")
-	router.HandleFunc("/hitl/deactivate", h.DeactivateSession).Methods("POST")
-	router.HandleFunc("/hitl/pending", h.ListPendingRequests).Methods("GET")
-	router.HandleFunc("/hitl/cancel", h.CancelRequest).Methods("POST")
+	router.HandleFunc("/register", h.RegisterSession).Methods("POST")
+	router.HandleFunc("/request", h.SubmitRequest).Methods("POST")
+	router.HandleFunc("/poll", h.PollRequest).Methods("GET")
+	router.HandleFunc("/status", h.GetStatus).Methods("GET")
+	router.HandleFunc("/deactivate", h.DeactivateSession).Methods("POST")
+	router.HandleFunc("/pending", h.ListPendingRequests).Methods("GET")
+	router.HandleFunc("/cancel", h.CancelRequest).Methods("POST")
 }
 
 func (h *HITLHandler) RegisterSession(w http.ResponseWriter, r *http.Request) {
