@@ -19,6 +19,8 @@ type Config struct {
 	SQLiteDSN             string // Data Source Name for SQLite (e.g., "loopgate.db" or "file::memory:?cache=shared")
 	JWTSecretKey          string // Secret key for signing JWTs
 	APIKeyPrefix          string // Prefix for generated API keys (e.g., "lk_pub_")
+	InitialAdminUser      string // Username for the initial admin user
+	InitialAdminPassword  string // Password for the initial admin user
 }
 
 func Load() *Config {
@@ -37,6 +39,8 @@ func Load() *Config {
 		SQLiteDSN:             getEnv("SQLITE_DSN", "loopgate.db"), // Default to a local file "loopgate.db"
 		JWTSecretKey:          getEnv("JWT_SECRET_KEY", "your-super-secret-and-long-jwt-key"),       // IMPORTANT: Change this in production!
 		APIKeyPrefix:          getEnv("API_KEY_PREFIX", "lk_pub_"),    // Default API key prefix
+		InitialAdminUser:      getEnv("INITIAL_ADMIN_USER", ""),
+		InitialAdminPassword:  getEnv("INITIAL_ADMIN_PASSWORD", ""),
 	}
 
 	if cfg.JWTSecretKey == "your-super-secret-and-long-jwt-key" {

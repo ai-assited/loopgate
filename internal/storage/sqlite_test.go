@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -249,4 +250,71 @@ func TestSQLiteStorageAdapter_Persistence(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, session)
 	assert.Equal(t, clientID, session.ClientID)
+}
+
+func TestSQLiteStorageAdapter_UserManagement(t *testing.T) {
+	adapter, cleanup := setupSQLiteAdapter(t)
+	defer cleanup()
+
+	// Test CreateUser
+	user1 := &types.User{
+		Username:     "testsqliteuser1",
+		PasswordHash: "hashsqlite1",
+		IsAdmin:      false,
+	}
+	err := adapter.CreateUser(user1)
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, user1.ID, "User ID should be populated")
+
+	// Test GetUserByUsername
+	retrievedUser1, err := adapter.GetUserByUsername("testsqliteuser1")
+	require.NoError(t, err)
+	require.NotNil(t, retrievedUser1)
+	assert.Equal(t, user1.ID, retrievedUser1.ID)
+	assert.Equal(t, "testsqliteuser1", retrievedUser1.Username)
+	assert.Equal(t, "hashsqlite1", retrievedUser1.PasswordHash)
+	assert.False(t, retrievedUser1.IsAdmin)
+	// SQLite may store time with slightly different precision or timezone handling
+	assert.WithinDuration(t, user1.CreatedAt.UTC(), retrievedUser1.CreatedAt.UTC(), 2*time.Second)
+	assert.WithinDuration(t, user1.UpdatedAt.UTC(), retrievedUser1.UpdatedAt.UTC(), 2*time.Second)
+
+
+	// Test CreateUser - Admin
+	adminUser := &types.User{
+		Username:     "adminsqliteuser",
+		PasswordHash: "adminhashsqlite",
+		IsAdmin:      true,
+	}
+	err = adapter.CreateUser(adminUser)
+	require.NoError(t, err)
+	require.NotEqual(t, uuid.Nil, adminUser.ID, "Admin User ID should be populated")
+
+	retrievedAdmin, err := adapter.GetUserByUsername("adminsqliteuser")
+	require.NoError(t, err)
+	require.NotNil(t, retrievedAdmin)
+	assert.Equal(t, adminUser.ID, retrievedAdmin.ID)
+	assert.True(t, retrievedAdmin.IsAdmin)
+
+	// Test GetUserByID
+	retrievedUserByID, err := adapter.GetUserByID(user1.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retrievedUserByID)
+	assert.Equal(t, user1.ID, retrievedUserByID.ID)
+	assert.Equal(t, "testsqliteuser1", retrievedUserByID.Username)
+
+	// Test CreateUser with duplicate username
+	duplicateUser := &types.User{
+		Username:     "testsqliteuser1", // Same as user1
+		PasswordHash: "hashsqlite2",
+	}
+	err = adapter.CreateUser(duplicateUser)
+	assert.Error(t, err, "Should error when creating user with duplicate username (UNIQUE constraint violation)")
+
+	// Test GetUserByUsername for non-existent user
+	_, err = adapter.GetUserByUsername("nonexistentsqliteuser")
+	assert.Error(t, err) // Expect gorm.ErrRecordNotFound or similar
+
+	// Test GetUserByID for non-existent user
+	_, err = adapter.GetUserByID(uuid.New())
+	assert.Error(t, err) // Expect gorm.ErrRecordNotFound or similar
 }
