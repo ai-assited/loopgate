@@ -7,6 +7,7 @@ import (
 	"loopgate/internal/session"
 	"loopgate/internal/telegram"
 	"loopgate/internal/types"
+	"loopgate/internal/whatsapp"
 	"net/http"
 	"time"
 
@@ -17,12 +18,14 @@ import (
 type HITLHandler struct {
 	sessionManager *session.Manager
 	telegramBot    *telegram.Bot
+	whatsappBot    *whatsapp.Bot
 }
 
-func NewHITLHandler(sessionManager *session.Manager, telegramBot *telegram.Bot) *HITLHandler {
+func NewHITLHandler(sessionManager *session.Manager, telegramBot *telegram.Bot, whatsappBot *whatsapp.Bot) *HITLHandler {
 	return &HITLHandler{
 		sessionManager: sessionManager,
 		telegramBot:    telegramBot,
+		whatsappBot:    whatsappBot,
 	}
 }
 
@@ -44,18 +47,23 @@ func (h *HITLHandler) RegisterSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.SessionID == "" || req.ClientID == "" || req.TelegramID == 0 {
-		http.Error(w, "Missing required fields", http.StatusBadRequest)
+	if req.SessionID == "" || req.ClientID == "" {
+		http.Error(w, "Missing required fields: session_id and client_id", http.StatusBadRequest)
 		return
 	}
 
-	err := h.sessionManager.RegisterSession(req.SessionID, req.ClientID, req.TelegramID)
+	if req.TelegramID == 0 && req.WhatsappJID == "" {
+		http.Error(w, "Missing required field: either telegram_id or whatsapp_jid must be provided", http.StatusBadRequest)
+		return
+	}
+
+	err := h.sessionManager.RegisterSession(req.SessionID, req.ClientID, req.TelegramID, req.WhatsappJID)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Failed to register session: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Registered session: %s for client: %s", req.SessionID, req.ClientID)
+	log.Printf("Registered session: %s for client: %s (TelegramID: %d, WhatsappJID: %s)", req.SessionID, req.ClientID, req.TelegramID, req.WhatsappJID)
 
 	response := map[string]interface{}{
 		"success":    true,
@@ -109,14 +117,68 @@ func (h *HITLHandler) SubmitRequest(w http.ResponseWriter, r *http.Request) {
 
 	h.sessionManager.StoreRequest(&req)
 
-	err = h.telegramBot.SendHITLRequest(&req)
-	if err != nil {
-		log.Printf("Failed to send telegram message: %v", err)
-		http.Error(w, "Failed to send request to Telegram", http.StatusInternalServerError)
+	var sendError error
+	sentVia := ""
+
+	// Determine channel preference
+	// TODO: Make this logic more robust, perhaps checking session capabilities directly
+	// For now, explicit preference in request, then check session fields.
+	preference := req.ChannelPreference
+	if preference == "" {
+		preference = "any" // Default to any
+	}
+
+	if preference == "whatsapp" || (preference == "any" && session.WhatsappJID != "") {
+		if h.whatsappBot != nil {
+			log.Printf("Attempting to send HITL request %s via WhatsApp to JID %s", req.ID, session.WhatsappJID)
+			// Ensure the whatsappBot is connected and ready if it has such a method
+			// For example: if err := h.whatsappBot.EnsureConnected(); err != nil { ... }
+			sendError = h.whatsappBot.SendHITLRequest(&req)
+			if sendError == nil {
+				sentVia = "WhatsApp"
+			} else {
+				log.Printf("Failed to send HITL request %s via WhatsApp: %v", req.ID, sendError)
+				// If preferred was whatsapp and it failed, should we fallback or error out?
+				// For now, if "any" was chosen and whatsapp failed, try telegram. If "whatsapp" was chosen and failed, error out.
+				if preference == "whatsapp" {
+					http.Error(w, fmt.Sprintf("Failed to send request to WhatsApp: %v", sendError), http.StatusInternalServerError)
+					return
+				}
+			}
+		} else {
+			sendError = fmt.Errorf("WhatsApp bot not configured")
+			log.Printf("WhatsApp bot not configured, cannot send HITL request %s", req.ID)
+			if preference == "whatsapp" {
+				http.Error(w, "WhatsApp integration is not configured", http.StatusInternalServerError)
+				return
+			}
+		}
+	}
+
+	// Try Telegram if not sent via WhatsApp or if WhatsApp was preferred but failed and preference was "any"
+	if sentVia == "" && (preference == "telegram" || preference == "any") {
+		if h.telegramBot != nil && session.TelegramID != 0 {
+			log.Printf("Attempting to send HITL request %s via Telegram to ID %d", req.ID, session.TelegramID)
+			sendError = h.telegramBot.SendHITLRequest(&req)
+			if sendError == nil {
+				sentVia = "Telegram"
+			} else {
+				log.Printf("Failed to send HITL request %s via Telegram: %v", req.ID, sendError)
+			}
+		} else if preference == "telegram" { // Explicitly asked for telegram but not possible
+			sendError = fmt.Errorf("Telegram bot not configured or user has no Telegram ID")
+			log.Printf("Cannot send HITL request %s via Telegram: %v", req.ID, sendError)
+		}
+	}
+
+	if sentVia == "" {
+		// If neither channel worked
+		log.Printf("Failed to send HITL request %s via any channel. Last error: %v", req.ID, sendError)
+		http.Error(w, fmt.Sprintf("Failed to send request via any available channel: %v", sendError), http.StatusInternalServerError)
 		return
 	}
 
-	log.Printf("Submitted HITL request: %s for client: %s", req.ID, req.ClientID)
+	log.Printf("Submitted HITL request: %s for client: %s via %s", req.ID, req.ClientID, sentVia)
 
 	response := map[string]interface{}{
 		"success":    true,

@@ -17,8 +17,8 @@ func NewManager(adapter storage.StorageAdapter) *Manager {
 	}
 }
 
-func (m *Manager) RegisterSession(sessionID, clientID string, telegramID int64) error {
-	return m.adapter.RegisterSession(sessionID, clientID, telegramID)
+func (m *Manager) RegisterSession(sessionID, clientID string, telegramID int64, whatsappJID string) error {
+	return m.adapter.RegisterSession(sessionID, clientID, telegramID, whatsappJID)
 }
 
 func (m *Manager) DeactivateSession(sessionID string) error {
@@ -33,12 +33,20 @@ func (m *Manager) GetTelegramID(clientID string) (int64, error) {
 	return m.adapter.GetTelegramID(clientID)
 }
 
+func (m *Manager) GetWhatsappJID(clientID string) (string, error) {
+	return m.adapter.GetWhatsappJID(clientID)
+}
+
 func (m *Manager) StoreRequest(request *types.HITLRequest) error {
 	return m.adapter.StoreRequest(request)
 }
 
 func (m *Manager) GetRequest(requestID string) (*types.HITLRequest, error) {
 	return m.adapter.GetRequest(requestID)
+}
+
+func (m *Manager) GetRequestByWhatsappMsgID(whatsappMsgID string) (*types.HITLRequest, error) {
+	return m.adapter.GetRequestByWhatsappMsgID(whatsappMsgID)
 }
 
 func (m *Manager) UpdateRequestResponse(requestID, response string, approved bool) error {

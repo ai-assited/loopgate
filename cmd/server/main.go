@@ -11,6 +11,7 @@ import (
 	"loopgate/internal/session"
 	"loopgate/internal/storage" // Added storage import
 	"loopgate/internal/telegram"
+	"loopgate/internal/whatsapp" // Added whatsapp import
 	"loopgate/internal/types"
 	"net/http"
 	"strings"
@@ -103,8 +104,27 @@ func main() {
 
 	go telegramBot.Start()
 
+	var whatsappBot *whatsapp.Bot
+	if cfg.WhatsappEnable {
+		log.Println("WhatsApp bot is enabled. Initializing...")
+		waBot, err := whatsapp.NewBot(sessionManager, cfg.WhatsappDbPath, cfg.WhatsappLogLevel)
+		if err != nil {
+			log.Printf("WARNING: Failed to create WhatsApp bot: %v. WhatsApp functionality will be unavailable.", err)
+			// Depending on strictness, could be log.Fatalf
+		} else {
+			whatsappBot = waBot
+			go whatsappBot.Start() // Start the WhatsApp bot
+			// Consider if whatsappBot.Connect() needs to be called explicitly here or if Start handles it.
+			// For now, assuming Start() handles connection and QR code process initiation.
+			log.Println("WhatsApp bot initialized and started.")
+		}
+	} else {
+		log.Println("WhatsApp bot is disabled via configuration.")
+	}
+
 	mcpServer := mcp.NewServer()
-	hitlHandler := handlers.NewHITLHandler(sessionManager, telegramBot)
+	// Pass whatsappBot (which might be nil) to NewHITLHandler
+	hitlHandler := handlers.NewHITLHandler(sessionManager, telegramBot, whatsappBot)
 	// Pass storageAdapter and cfg to NewRouter
 	appRouter := router.NewRouter(mcpServer, hitlHandler, storageAdapter, cfg)
 
@@ -139,6 +159,13 @@ func main() {
 	// Close the database connection if a closer function was set
 	if closer != nil {
 		closer()
+	}
+
+	// Stop the WhatsApp bot if it was initialized
+	if whatsappBot != nil {
+		log.Println("Stopping WhatsApp bot...")
+		whatsappBot.Stop() // Assuming Stop() handles necessary cleanup like client.Disconnect()
+		log.Println("WhatsApp bot stopped.")
 	}
 
 	log.Println("Server exited")

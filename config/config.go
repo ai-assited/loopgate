@@ -21,6 +21,11 @@ type Config struct {
 	APIKeyPrefix          string // Prefix for generated API keys (e.g., "lk_pub_")
 	InitialAdminUser      string // Username for the initial admin user
 	InitialAdminPassword  string // Password for the initial admin user
+
+	// WhatsApp specific configuration
+	WhatsappEnable   bool   `json:"whatsapp_enable"`
+	WhatsappDbPath   string `json:"whatsapp_db_path"`   // e.g., "whatsapp_store.db"
+	WhatsappLogLevel string `json:"whatsapp_log_level"` // e.g., "INFO", "DEBUG"
 }
 
 func Load() *Config {
@@ -41,6 +46,11 @@ func Load() *Config {
 		APIKeyPrefix:          getEnv("API_KEY_PREFIX", "lk_pub_"),    // Default API key prefix
 		InitialAdminUser:      getEnv("INITIAL_ADMIN_USER", ""),
 		InitialAdminPassword:  getEnv("INITIAL_ADMIN_PASSWORD", ""),
+
+		// WhatsApp specific
+		WhatsappEnable:   getEnvBool("WHATSAPP_ENABLE", false), // Default to false
+		WhatsappDbPath:   getEnv("WHATSAPP_DB_PATH", "whatsapp_store.db"),
+		WhatsappLogLevel: getEnv("WHATSAPP_LOG_LEVEL", "INFO"), // Default to INFO
 	}
 
 	if cfg.JWTSecretKey == "your-super-secret-and-long-jwt-key" {
@@ -70,6 +80,15 @@ func Load() *Config {
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
+	}
+	return defaultValue
+}
+
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		if boolVal, err := strconv.ParseBool(value); err == nil {
+			return boolVal
+		}
 	}
 	return defaultValue
 }

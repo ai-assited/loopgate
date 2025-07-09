@@ -39,14 +39,17 @@ type HITLRequest struct {
 	CreatedAt     time.Time              `json:"created_at"`
 	RespondedAt   *time.Time             `json:"responded_at,omitempty"`
 	TelegramMsgID int                    `json:"telegram_msg_id,omitempty"`
+	WhatsappMsgID string                 `json:"whatsapp_msg_id,omitempty"`
+	ChannelPreference string            `json:"channel_preference,omitempty"` // "telegram", "whatsapp", "any"
 }
 
 type Session struct {
-	ID         string `json:"id" gorm:"primaryKey"`
-	ClientID   string `json:"client_id"`
-	TelegramID int64  `json:"telegram_id"`
-	Active     bool   `json:"active"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID          string `json:"id" gorm:"primaryKey"`
+	ClientID    string `json:"client_id"`
+	TelegramID  int64  `json:"telegram_id,omitempty"`
+	WhatsappJID string `json:"whatsapp_jid,omitempty"` // e.g., "number@s.whatsapp.net"
+	Active      bool   `json:"active"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 type HITLResponse struct {
@@ -58,9 +61,10 @@ type HITLResponse struct {
 }
 
 type SessionRegistration struct {
-	SessionID  string `json:"session_id"`
-	ClientID   string `json:"client_id"`
-	TelegramID int64  `json:"telegram_id"`
+	SessionID   string `json:"session_id"`
+	ClientID    string `json:"client_id"`
+	TelegramID  int64  `json:"telegram_id,omitempty"`
+	WhatsappJID string `json:"whatsapp_jid,omitempty"`
 }
 
 type PollResponse struct {

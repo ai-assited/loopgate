@@ -42,13 +42,14 @@ func NewSQLiteStorageAdapter(dsn string) (*SQLiteStorageAdapter, error) {
 }
 
 // RegisterSession stores a new session.
-func (s *SQLiteStorageAdapter) RegisterSession(sessionID, clientID string, telegramID int64) error {
+func (s *SQLiteStorageAdapter) RegisterSession(sessionID, clientID string, telegramID int64, whatsappJID string) error {
 	session := &types.Session{
-		ID:         sessionID,
-		ClientID:   clientID,
-		TelegramID: telegramID,
-		Active:     true,
-		CreatedAt:  time.Now(),
+		ID:          sessionID,
+		ClientID:    clientID,
+		TelegramID:  telegramID,
+		WhatsappJID: whatsappJID,
+		Active:      true,
+		CreatedAt:   time.Now(),
 	}
 	return s.db.Create(session).Error
 }
@@ -74,14 +75,27 @@ func (s *SQLiteStorageAdapter) GetSession(sessionID string) (*types.Session, err
 // GetTelegramID retrieves the Telegram ID associated with an active Client ID.
 func (s *SQLiteStorageAdapter) GetTelegramID(clientID string) (int64, error) {
 	var session types.Session
-	err := s.db.Where("client_id = ? AND active = ?", clientID, true).First(&session).Error
+	err := s.db.Where("client_id = ? AND active = ? AND telegram_id != 0", clientID, true).Order("created_at DESC").First(&session).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return 0, errors.New("active session for client not found")
+			return 0, errors.New("active session with telegram_id not found for client")
 		}
 		return 0, err
 	}
 	return session.TelegramID, nil
+}
+
+// GetWhatsappJID retrieves the WhatsApp JID associated with an active Client ID.
+func (s *SQLiteStorageAdapter) GetWhatsappJID(clientID string) (string, error) {
+	var session types.Session
+	err := s.db.Where("client_id = ? AND active = ? AND whatsapp_jid != '' AND whatsapp_jid IS NOT NULL", clientID, true).Order("created_at DESC").First(&session).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", errors.New("active session with whatsapp_jid not found for client")
+		}
+		return "", err
+	}
+	return session.WhatsappJID, nil
 }
 
 // StoreRequest stores a new HITL request.
@@ -96,6 +110,19 @@ func (s *SQLiteStorageAdapter) GetRequest(requestID string) (*types.HITLRequest,
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("request not found")
+		}
+		return nil, err
+	}
+	return &request, nil
+}
+
+// GetRequestByWhatsappMsgID retrieves a HITL request by its WhatsApp message ID.
+func (s *SQLiteStorageAdapter) GetRequestByWhatsappMsgID(whatsappMsgID string) (*types.HITLRequest, error) {
+	var request types.HITLRequest
+	err := s.db.Where("whatsapp_msg_id = ?", whatsappMsgID).First(&request).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("request not found for whatsapp_msg_id")
 		}
 		return nil, err
 	}

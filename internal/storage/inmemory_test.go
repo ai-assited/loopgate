@@ -16,9 +16,10 @@ func TestInMemoryStorageAdapter_SessionManagement(t *testing.T) {
 	sessionID := "test-session-1"
 	clientID := "test-client-1"
 	telegramID := int64(12345)
+	whatsappJID := "1234567890@s.whatsapp.net"
 
-	// Test RegisterSession
-	err := adapter.RegisterSession(sessionID, clientID, telegramID)
+	// Test RegisterSession with Telegram ID only
+	err := adapter.RegisterSession(sessionID, clientID, telegramID, "")
 	require.NoError(t, err)
 
 	// Test GetSession
@@ -28,12 +29,17 @@ func TestInMemoryStorageAdapter_SessionManagement(t *testing.T) {
 	assert.Equal(t, sessionID, session.ID)
 	assert.Equal(t, clientID, session.ClientID)
 	assert.Equal(t, telegramID, session.TelegramID)
+	assert.Equal(t, "", session.WhatsappJID) // Ensure WhatsappJID is empty
 	assert.True(t, session.Active)
 
 	// Test GetTelegramID
 	retrievedTelegramID, err := adapter.GetTelegramID(clientID)
 	require.NoError(t, err)
 	assert.Equal(t, telegramID, retrievedTelegramID)
+
+	// Test GetWhatsappJID (should error or be empty as none was registered for this client yet in this session)
+	_, err = adapter.GetWhatsappJID(clientID)
+	assert.Error(t, err, "Expected error or empty when getting WhatsappJID for client with only Telegram ID")
 
 	// Test DeactivateSession
 	err = adapter.DeactivateSession(sessionID)
@@ -43,23 +49,56 @@ func TestInMemoryStorageAdapter_SessionManagement(t *testing.T) {
 	require.NotNil(t, session)
 	assert.False(t, session.Active)
 
-	// Test GetTelegramID for deactivated session's client (should fail or return error)
+	// Test GetTelegramID for deactivated session's client (should fail)
 	_, err = adapter.GetTelegramID(clientID)
 	assert.Error(t, err, "Expected error when getting TelegramID for client with deactivated session")
+
+	// Register a new session with WhatsApp JID only
+	sessionID2 := "test-session-2"
+	clientID2 := "test-client-2"
+	err = adapter.RegisterSession(sessionID2, clientID2, 0, whatsappJID)
+	require.NoError(t, err)
+
+	session2, err := adapter.GetSession(sessionID2)
+	require.NoError(t, err)
+	require.NotNil(t, session2)
+	assert.Equal(t, clientID2, session2.ClientID)
+	assert.Equal(t, int64(0), session2.TelegramID)
+	assert.Equal(t, whatsappJID, session2.WhatsappJID)
+	assert.True(t, session2.Active)
+
+	// Test GetWhatsappJID for clientID2
+	retrievedWhatsappJID, err := adapter.GetWhatsappJID(clientID2)
+	require.NoError(t, err)
+	assert.Equal(t, whatsappJID, retrievedWhatsappJID)
+
+	// Test GetTelegramID for clientID2 (should error)
+	_, err = adapter.GetTelegramID(clientID2)
+	assert.Error(t, err, "Expected error when getting TelegramID for client with only WhatsApp JID")
+
+	// Test DeactivateSession for session2
+	err = adapter.DeactivateSession(sessionID2)
+	require.NoError(t, err)
+	_, err = adapter.GetWhatsappJID(clientID2)
+	assert.Error(t, err, "Expected error when getting WhatsappJID for client with deactivated session")
 
 
 	// Test GetActiveSessions
 	activeSessions, err := adapter.GetActiveSessions()
 	require.NoError(t, err)
-	assert.Empty(t, activeSessions, "Expected no active sessions after deactivation")
+	assert.Empty(t, activeSessions, "Expected no active sessions after deactivation of both sessions")
 
-	// Register another active session to test GetActiveSessions
-	err = adapter.RegisterSession("active-session-2", "client-2", 67890)
+	// Register a session with both IDs to test GetActiveSessions
+	sessionID3 := "active-session-3"
+	clientID3 := "client-3"
+	err = adapter.RegisterSession(sessionID3, clientID3, 78901, "another_jid@s.whatsapp.net")
 	require.NoError(t, err)
 	activeSessions, err = adapter.GetActiveSessions()
 	require.NoError(t, err)
 	assert.Len(t, activeSessions, 1, "Expected one active session")
-	assert.Equal(t, "active-session-2", activeSessions[0].ID)
+	assert.Equal(t, sessionID3, activeSessions[0].ID)
+	assert.Equal(t, int64(78901), activeSessions[0].TelegramID)
+	assert.Equal(t, "another_jid@s.whatsapp.net", activeSessions[0].WhatsappJID)
 }
 
 func TestInMemoryStorageAdapter_RequestManagement(t *testing.T) {
@@ -170,6 +209,40 @@ func TestInMemoryStorageAdapter_ErrorConditions(t *testing.T) {
 	_, errCond = adapter.GetTelegramID("non-existent-client")
 	assert.Error(t, errCond)
 }
+
+func TestInMemoryStorageAdapter_GetRequestByWhatsappMsgID(t *testing.T) {
+	adapter := NewInMemoryStorageAdapter()
+
+	whatsappMsgID := "whatsapp-msg-id-123"
+	requestID := "request-for-whatsapp-msg"
+
+	request := &types.HITLRequest{
+		ID:            requestID,
+		SessionID:     "session-whatsapp-test",
+		ClientID:      "client-whatsapp-test",
+		Message:       "Test request for WhatsApp message ID",
+		Status:        types.RequestStatusPending,
+		CreatedAt:     time.Now(),
+		WhatsappMsgID: whatsappMsgID,
+	}
+
+	// Store the request
+	err := adapter.StoreRequest(request)
+	require.NoError(t, err)
+
+	// Test GetRequestByWhatsappMsgID with existing ID
+	retrievedRequest, err := adapter.GetRequestByWhatsappMsgID(whatsappMsgID)
+	require.NoError(t, err)
+	require.NotNil(t, retrievedRequest)
+	assert.Equal(t, requestID, retrievedRequest.ID)
+	assert.Equal(t, whatsappMsgID, retrievedRequest.WhatsappMsgID)
+
+	// Test GetRequestByWhatsappMsgID with non-existent ID
+	_, err = adapter.GetRequestByWhatsappMsgID("non-existent-whatsapp-msg-id")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "request not found for whatsapp message id")
+}
+
 
 func TestInMemoryStorageAdapter_UserManagement(t *testing.T) {
 	adapter := NewInMemoryStorageAdapter()

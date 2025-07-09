@@ -10,12 +10,14 @@ import (
 // StorageAdapter defines the interface for data persistence.
 type StorageAdapter interface {
 	// Session and HITL methods (existing)
-	RegisterSession(sessionID, clientID string, telegramID int64) error
+	RegisterSession(sessionID, clientID string, telegramID int64, whatsappJID string) error
 	DeactivateSession(sessionID string) error
 	GetSession(sessionID string) (*types.Session, error)
 	GetTelegramID(clientID string) (int64, error)
+	GetWhatsappJID(clientID string) (string, error)
 	StoreRequest(request *types.HITLRequest) error
 	GetRequest(requestID string) (*types.HITLRequest, error)
+	GetRequestByWhatsappMsgID(whatsappMsgID string) (*types.HITLRequest, error) // New
 	UpdateRequestResponse(requestID, response string, approved bool) error
 	GetPendingRequests() ([]*types.HITLRequest, error)
 	CancelRequest(requestID string) error
